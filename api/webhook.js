@@ -19,12 +19,12 @@ const EmbedSchema = z.object({
 
 const WebhookSchema = z.object({
   content: z.string().min(1).max(2000),
-  embeds: z.array(EmbedSchema).max(10)
+  embeds: z.array(EmbedSchema).min(1).max(10)
 }).strict();
 
-export default function handler(req, res) {
+export default async function handler(req, res) {
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "1" });
+    return res.status(405).json({ error: "POST only" });
   }
 
   let data;
@@ -32,9 +32,14 @@ export default function handler(req, res) {
     data = WebhookSchema.parse(req.body);
   } catch (e) {
     return res.status(400).json({
-      error: "2",
+      error: "Invalid format",
       details: e.errors
     });
+  }
+
+  const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
+  if (!webhookUrl) {
+    return res.status(500).json({ error: "Webhook not configured" });
   }
 
   const embed = data.embeds[0];
@@ -55,8 +60,20 @@ export default function handler(req, res) {
     }]
   };
 
-  return res.status(200).json({
-    ok: true,
-    webhook: formatted
+  const r = await fetch(webhookUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(formatted)
   });
+
+  if (!r.ok) {
+    const text = await r.text();
+    return res.status(502).json({
+      error: "Discord rejected webhook",
+      status: r.status,
+      body: text
+    });
+  }
+
+  return res.status(200).json({ ok: true });
 }
